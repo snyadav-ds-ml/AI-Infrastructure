@@ -1,4 +1,4 @@
-Project Details : We are implementing project-01 placed in projects folder. The project code will reside in directory `AI-Infrastructure`
+Project Details : Read project-01 placed in projects folder. The project implementation code will reside in directory `AI-Infrastructure`
 
 You are operating in safe execution mode.
 
