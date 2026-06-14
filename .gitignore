@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Data files (don't commit large files)
+*.csv
+*.h5
+*.pkl
+*.pth
+*.ckpt
+
+# Model files
+models/
+*.model
+*.weights
+
+# Docker
+*.tar
+
+# Tutorials
+exercises/
+modules/
+notes/
+projects/
+
