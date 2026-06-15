@@ -20,7 +20,7 @@ No new routes.
 ## Files to create
 
 ```
-projects/project-01/
+AI-Infrastructure
 ├── src/
 │   ├── __init__.py          # empty, marks src as a package
 │   ├── config.py            # stub — Settings class, reads from .env
@@ -50,7 +50,7 @@ projects/project-01/
 └── .env.example             # all required env vars with placeholder values
 ```
 
-## Files to change
+## Files to read
 - `projects/project-01/` — directory does not exist yet; this step creates it entirely.
 
 ## New dependencies

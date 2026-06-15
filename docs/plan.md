@@ -67,7 +67,7 @@ projects/project-01/
 ```
 
 **Steps:**
-1. Create the directory tree above inside `projects/project-01/`
+1. Create the directory tree  `AI-Infrasturcture` directory
 2. Write `src/config.py` — use `pydantic-settings` or `python-dotenv` to read from `.env`.
    Settings needed: `MODEL_NAME`, `DEVICE`, `HOST`, `PORT`, `LOG_LEVEL`, `MAX_IMAGE_SIZE_MB`
 3. Write `.env.example` with all keys documented (never commit `.env`)
