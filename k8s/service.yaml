@@ -3,3 +3,11 @@ kind: Service
 metadata:
   name: ml-api-service
   namespace: ml-serving
+spec:
+  type: LoadBalancer
+  selector:
+    app: ml-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000

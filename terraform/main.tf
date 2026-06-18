@@ -63,4 +63,6 @@ module "monitoring" {
 
   namespace              = var.monitoring_namespace
   grafana_admin_password = var.grafana_admin_password
+
+  depends_on = [module.eks]
 }

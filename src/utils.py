@@ -34,6 +34,10 @@ def setup_logging(level: str) -> None:
 
 def download_image(url: str) -> Image.Image:
     response = requests.get(url, stream=True, timeout=10)
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        raise RuntimeError(f"Failed to fetch image: {exc}") from exc
     content_type = response.headers.get("content-type", "")
     if not content_type.startswith("image/"):
         raise ValueError(f"Expected image content-type, got: {content_type!r}")
