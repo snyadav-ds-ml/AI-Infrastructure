@@ -17,3 +17,13 @@ output "kubeconfig_cmd" {
   description = "Run this after apply to configure kubectl"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "grafana_access_cmd" {
+  description = "Get the Grafana LoadBalancer hostname after apply"
+  value       = "kubectl get svc -n ${var.monitoring_namespace} kube-prometheus-stack-grafana -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
+
+output "prometheus_port_forward_cmd" {
+  description = "Port-forward to Prometheus UI (runs locally on 9090)"
+  value       = "kubectl port-forward svc/kube-prometheus-stack-prometheus -n ${var.monitoring_namespace} 9090:9090"
+}

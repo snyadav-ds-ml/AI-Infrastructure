@@ -42,7 +42,11 @@ terraform/                          ← run all terraform commands from here
     │   ├── main.tf
     │   ├── variables.tf
     │   └── outputs.tf
-    └── ecr/
+    ├── ecr/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    └── monitoring/                 ← NEW: Helm-based Prometheus + Grafana
         ├── main.tf
         ├── variables.tf
         └── outputs.tf
@@ -62,6 +66,12 @@ Community modules downloaded automatically by `terraform init`:
 - `terraform-aws-modules/eks/aws` v20.37.2 (pulls `kms` v2.1.0 as a sub-module)
 - `terraform-aws-modules/ecr/aws` v2.4.0
 
+Terraform providers added for Helm:
+- `hashicorp/helm` `~> 2.12` — installs Helm charts into the EKS cluster
+
+Helm charts installed by the monitoring module:
+- `prometheus-community/kube-prometheus-stack` v58.2.1 — bundles Prometheus + Grafana + Node Exporter
+
 ---
 
 ## Implementation — exact file contents
@@ -76,6 +86,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.12"
+    }
   }
 
   # Local state is fine for solo development.
@@ -84,6 +98,19 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+}
+
+# Helm provider connects to EKS using the aws CLI exec plugin — no static kubeconfig needed.
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+      command     = "aws"
+    }
+  }
 }
 
 module "vpc" {
@@ -109,6 +136,13 @@ module "ecr" {
   source = "./modules/ecr"
 
   repo_name = var.ecr_repo_name
+}
+
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  namespace              = var.monitoring_namespace
+  grafana_admin_password = var.grafana_admin_password
 }
 ```
 
@@ -148,6 +182,17 @@ variable "ecr_repo_name" {
   description = "Name of the ECR repository for the ML API Docker image"
   default     = "ml-api"
 }
+
+variable "monitoring_namespace" {
+  description = "Kubernetes namespace for the Prometheus + Grafana monitoring stack"
+  default     = "monitoring"
+}
+
+variable "grafana_admin_password" {
+  description = "Admin password for Grafana (sensitive — set in terraform.tfvars, never commit)"
+  type        = string
+  sensitive   = true
+}
 ```
 
 ### `terraform/outputs.tf`
@@ -171,16 +216,28 @@ output "kubeconfig_cmd" {
   description = "Run this after apply to configure kubectl"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "grafana_access_cmd" {
+  description = "Get the Grafana LoadBalancer hostname after apply"
+  value       = "kubectl get svc -n ${var.monitoring_namespace} kube-prometheus-stack-grafana -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
+
+output "prometheus_port_forward_cmd" {
+  description = "Port-forward to Prometheus UI (runs locally on 9090)"
+  value       = "kubectl port-forward svc/kube-prometheus-stack-prometheus -n ${var.monitoring_namespace} 9090:9090"
+}
 ```
 
 ### `terraform/terraform.tfvars` (gitignored)
 ```hcl
-aws_region         = "us-east-1"
-cluster_name       = "ml-serving-cluster"
-node_instance_type = "t3.medium"
-node_desired_size  = 2
-node_max_size      = 5
-ecr_repo_name      = "ml-api"
+aws_region             = "us-east-1"
+cluster_name           = "ml-serving-cluster"
+node_instance_type     = "t3.medium"
+node_desired_size      = 2
+node_max_size          = 5
+ecr_repo_name          = "ml-api"
+monitoring_namespace   = "monitoring"
+grafana_admin_password = "changeme123"   # change before apply; never commit real passwords
 ```
 
 ---
@@ -389,6 +446,82 @@ output "repository_url" {
 
 ---
 
+### `terraform/modules/monitoring/variables.tf`
+```hcl
+variable "namespace" {
+  description = "Kubernetes namespace to install the monitoring stack into"
+  type        = string
+  default     = "monitoring"
+}
+
+variable "grafana_admin_password" {
+  description = "Admin password for Grafana"
+  type        = string
+  sensitive   = true
+}
+
+variable "chart_version" {
+  description = "kube-prometheus-stack Helm chart version"
+  type        = string
+  default     = "58.2.1"
+}
+```
+
+### `terraform/modules/monitoring/main.tf`
+```hcl
+resource "helm_release" "kube_prometheus_stack" {
+  name             = "kube-prometheus-stack"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = var.chart_version
+  namespace        = var.namespace
+  create_namespace = true
+  timeout          = 600
+
+  set {
+    name  = "grafana.adminPassword"
+    value = var.grafana_admin_password
+  }
+
+  set {
+    name  = "grafana.service.type"
+    value = "LoadBalancer"
+  }
+
+  set {
+    name  = "prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues"
+    value = "false"
+  }
+
+  set {
+    name  = "alertmanager.enabled"
+    value = "false"
+  }
+}
+```
+
+Key decisions:
+- `create_namespace = true` — Helm creates the namespace; no separate `kubernetes_namespace` resource needed, which avoids adding a `kubernetes` provider
+- `timeout = 600` — kube-prometheus-stack deploys ~20 CRDs and several pods; 10 min prevents spurious timeouts
+- `grafana.service.type = LoadBalancer` — exposes Grafana via an AWS ELB so you can reach it without `kubectl port-forward`
+- `alertmanager.enabled = false` — Alertmanager is out of scope for this project; omitting it saves ~512 Mi memory per node
+- `serviceMonitorSelectorNilUsesHelmValues = false` — Prometheus picks up ServiceMonitors from all namespaces, including the `ml-serving` namespace where the API runs
+
+### `terraform/modules/monitoring/outputs.tf`
+```hcl
+output "namespace" {
+  description = "Namespace where the monitoring stack is installed"
+  value       = helm_release.kube_prometheus_stack.namespace
+}
+
+output "release_name" {
+  description = "Helm release name — used to derive child service names (e.g. kube-prometheus-stack-grafana)"
+  value       = helm_release.kube_prometheus_stack.name
+}
+```
+
+---
+
 ### `.gitignore` additions
 ```
 # Terraform
@@ -426,22 +559,27 @@ terraform output ecr_repo_url           # ECR URI for docker push in Step 06
 | KMS key + API calls | ~$1.03 |
 | CloudWatch Logs | ~$1.18 |
 | ECR storage | ~$0.10 |
-| **Total** | **~$169/month (~$5.65/day)** |
+| ELB for Grafana (LoadBalancer svc) | ~$18.00 |
+| **Total** | **~$187/month (~$6.25/day)** |
 
 **Run `terraform destroy` when not actively developing.**
 
 ## Definition of done
-- [ ] `terraform/modules/vpc/`, `terraform/modules/eks/`, `terraform/modules/ecr/` all exist
-      with `main.tf`, `variables.tf`, `outputs.tf` in each
-- [ ] `terraform/terraform.tfvars` exists locally (not committed to git)
+- [ ] `terraform/modules/vpc/`, `terraform/modules/eks/`, `terraform/modules/ecr/`,
+      `terraform/modules/monitoring/` all exist with `main.tf`, `variables.tf`, `outputs.tf`
+- [ ] `terraform/terraform.tfvars` exists locally (not committed to git) and includes
+      `grafana_admin_password`
 - [ ] `.gitignore` excludes `*.tfstate*`, `.terraform/`, `*.tfvars`, `.terraform.lock.hcl`
-- [ ] `terraform init` completes — downloads vpc, eks, ecr community modules with no errors
+- [ ] `terraform init` completes — downloads vpc, eks, ecr, helm providers with no errors
 - [ ] `terraform validate` passes with "Success! The configuration is valid."
-- [ ] `terraform plan` shows **55 resources** to add with no errors
+- [ ] `terraform plan` shows resources to add with no errors
 - [ ] `terraform apply` completes successfully
 - [ ] `aws eks list-clusters` shows `ml-serving-cluster`
 - [ ] `terraform output kubeconfig_cmd | bash` runs without error
 - [ ] `kubectl get nodes` shows ≥ 1 Ready node (t3.medium)
+- [ ] `kubectl get pods -n monitoring` shows Prometheus and Grafana pods in `Running` state
+- [ ] Grafana LoadBalancer hostname resolves and the UI is accessible in a browser
+- [ ] Grafana → Data sources shows Prometheus connected automatically
 - [ ] `aws ecr describe-repositories` shows `ml-api` repository
 - [ ] `terraform output ecr_repo_url` returns a valid ECR URI
 - [ ] No AWS credentials or account IDs are hardcoded in any `.tf` file
