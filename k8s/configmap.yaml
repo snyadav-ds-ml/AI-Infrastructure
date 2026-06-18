@@ -3,3 +3,10 @@ kind: ConfigMap
 metadata:
   name: ml-api-config
   namespace: ml-serving
+data:
+  MODEL_NAME: "resnet18"
+  DEVICE: "cpu"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  LOG_LEVEL: "INFO"
+  MAX_IMAGE_SIZE_MB: "5"
