@@ -32,3 +32,14 @@ variable "ecr_repo_name" {
   description = "Name of the ECR repository for the ML API Docker image"
   default     = "ml-api"
 }
+
+variable "monitoring_namespace" {
+  description = "Kubernetes namespace for the Prometheus + Grafana monitoring stack"
+  default     = "monitoring"
+}
+
+variable "grafana_admin_password" {
+  description = "Admin password for Grafana (sensitive — set in terraform.tfvars, never commit)"
+  type        = string
+  sensitive   = true
+}
